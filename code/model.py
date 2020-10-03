@@ -34,12 +34,11 @@ def convlxl(in_planes, out_planes):
 def child_to_parent(child_c_code, classes_child, classes_parent):
 
     ratio = classes_child / classes_parent
-    arg_parent = torch.argmax(child_c_code,  dim = 1) / ratio
+    arg_parent = torch.argmax(child_c_code, dim=1) / ratio
     parent_c_code = torch.zeros([child_c_code.size(0), classes_parent]).cuda()
     for i in range(child_c_code.size(0)):
-	parent_c_code[i][arg_parent[i]] = 1
+        parent_c_code[i][arg_parent[i].type(torch.LongTensor)] = 1
     return parent_c_code
-
 
 # ############## G networks ################################################
 # Upsale the spatial size by a factor of 2
@@ -112,7 +111,7 @@ class INIT_STAGE_G_(nn.Module):
         self.upsample3 = upBlock(ngf // 4, ngf // 8)
         self.upsample4 = upBlock(ngf // 8, ngf // 16)
         self.upsample5 = upBlock(ngf // 16, ngf // 16)
-        self.attn = Self_Attn(64, 'relu')
+        self.attn = Self_Attn(ngf // 16, 'relu')
 
     def forward(self, z_code, code):
         in_code = torch.cat((code, z_code), 1)
@@ -187,7 +186,7 @@ class NEXT_STAGE_G(nn.Module):
         self.jointConv = Block3x3_relu(ngf + efg, ngf)
         # self.residual = self._make_layer(ResBlock, ngf)
         self.samesample = sameBlock(ngf, ngf // 2)
-        self.attn1 = Self_Attn(128, 'relu')
+        self.attn1 = Self_Attn(ngf // 2, 'relu')
 
     def forward(self, h_code, code):
         s_size = h_code.size(2)
@@ -243,19 +242,19 @@ class Self_Attn(nn.Module):
         """
         m_batchsize, C, width, height = x.size()
         proj_query = self.query_conv(x).view(
-            m_batchsize, -1, width*height).permute(0, 2, 1)  # B X CX(N)
+            m_batchsize, -1, width*height).permute(0, 2, 1)  # B X C X (N)
         proj_key = self.key_conv(x).view(
             m_batchsize, -1, width*height)  # B X C x (*W*H)
         energy = torch.bmm(proj_query, proj_key)  # transpose check
-        attention = self.softmax(energy)  # BX (N) X (N)
+        attention = self.softmax(energy)  # B X (N) X (N)
         proj_value = self.value_conv(x).view(
             m_batchsize, -1, width*height)  # B X C X N
 
         out = torch.bmm(proj_value, attention.permute(0, 2, 1))
         out = out.view(m_batchsize, C, width, height)
-
+        mk = out.clone()
         out = self.gamma * out + x
-        return out, attention
+        return out, mk
 
 
 class GET_MASK_G(nn.Module):
@@ -267,8 +266,8 @@ class GET_MASK_G(nn.Module):
             nn.Sigmoid()
         )
 
-    def forward(self, attention):
-        mask = self.img(attention)
+    def forward(self, mk):
+        mask = self.img(mk)
         return mask
 
 
@@ -277,7 +276,7 @@ class G_NET(nn.Module):
         super(G_NET, self).__init__()
         self.gf_dim = cfg.GAN.GF_DIM
         self.define_module()
-        self.upsampling = Upsample(scale_factor = 2, mode = 'bilinear')
+        self.upsampling = Upsample(scale_factor=2, mode = 'bilinear')
         self.scale_fimg = nn.UpsamplingBilinear2d(size = [126, 126])
 
     def define_module(self):
@@ -316,9 +315,9 @@ class G_NET(nn.Module):
 
         #Parent stage
         h_code1 = self.h_net1(z_code, p_code)
-        h_code2, attention_p = self.h_net2(h_code1, p_code)
+        h_code2, mk_p = self.h_net2(h_code1, p_code)
         fake_img2_foreground = self.img_net2(h_code2) # Parent foreground
-        fake_img2_mask = self.img_net2_mask(attention_p)  # Parent mask
+        fake_img2_mask = self.img_net2_mask(mk_p)  # Parent mask
         ones_mask_p = torch.ones_like(fake_img2_mask)
         opp_mask_p = ones_mask_p - fake_img2_mask
         fg_masked2 = torch.mul(fake_img2_foreground, fake_img2_mask)
@@ -330,9 +329,9 @@ class G_NET(nn.Module):
         mk_imgs.append(fake_img2_mask)
 
         #Child stage
-        h_code3, attention_c = self.h_net3(h_code2, c_code)
+        h_code3, mk_c = self.h_net3(h_code2, c_code)
         fake_img3_foreground = self.img_net3(h_code3) # Child foreground
-        fake_img3_mask = self.img_net3_mask(attention_c)  # Child mask
+        fake_img3_mask = self.img_net3_mask(mk_c)  # Child mask
         ones_mask_c = torch.ones_like(fake_img3_mask)
         opp_mask_c = ones_mask_c - fake_img3_mask
         fg_masked3 = torch.mul(fake_img3_foreground, fake_img3_mask)
@@ -402,12 +401,12 @@ class D_NET(nn.Module):
         self.df_dim = cfg.GAN.DF_DIM
         self.stg_no = stg_no
 
-	if self.stg_no  == 0:
-		self.ef_dim = 1
-	elif self.stg_no == 1:
-        	self.ef_dim = cfg.SUPER_CATEGORIES
+        if self.stg_no  == 0:
+                self.ef_dim = 1
+        elif self.stg_no == 1:
+                self.ef_dim = cfg.SUPER_CATEGORIES
         elif self.stg_no == 2:
-        	self.ef_dim = cfg.FINE_GRAINED_CATEGORIES
+                self.ef_dim = cfg.FINE_GRAINED_CATEGORIES
         else:
                 print ("Invalid stage number. Set stage number as follows:")
                 print ("0 - for background stage")
@@ -423,7 +422,7 @@ class D_NET(nn.Module):
 
         if self.stg_no == 0:
 
-        	self.patchgan_img_code_s16 = encode_background_img(ndf)
+                self.patchgan_img_code_s16 = encode_background_img(ndf)
                 self.uncond_logits1 = nn.Sequential(
                 nn.Conv2d(ndf * 4, 1, kernel_size=4, stride=1),
                 nn.Sigmoid())
@@ -432,12 +431,12 @@ class D_NET(nn.Module):
                 nn.Sigmoid())
 
         else:
-        	self.img_code_s16 = encode_parent_and_child_img(ndf)
-		self.img_code_s32 = downBlock(ndf * 8, ndf * 16)
-		self.img_code_s32_1 = Block3x3_leakRelu(ndf * 16, ndf * 8)
+                self.img_code_s16 = encode_parent_and_child_img(ndf)
+                self.img_code_s32 = downBlock(ndf * 8, ndf * 16)
+                self.img_code_s32_1 = Block3x3_leakRelu(ndf * 16, ndf * 8)
 
-		self.logits = nn.Sequential(
-		    nn.Conv2d(ndf * 8, efg, kernel_size=4, stride=4))
+                self.logits = nn.Sequential(
+                    nn.Conv2d(ndf * 8, efg, kernel_size=4, stride=4))
 
                 self.jointConv = Block3x3_leakRelu(ndf * 8, ndf * 8)
                 self.uncond_logits = nn.Sequential(
@@ -447,20 +446,20 @@ class D_NET(nn.Module):
 
     def forward(self, x_var):
 
-	if self.stg_no == 0:
-        	x_code = self.patchgan_img_code_s16(x_var)
-            	classi_score = self.uncond_logits1(x_code) # Background vs Foreground classification score (0 - background and 1 - foreground)
-        	rf_score = self.uncond_logits2(x_code) # Real/Fake score for the background image
-		return [classi_score, rf_score]
+        if self.stg_no == 0:
+                x_code = self.patchgan_img_code_s16(x_var)
+                classi_score = self.uncond_logits1(x_code) # Background vs Foreground classification score (0 - background and 1 - foreground)
+                rf_score = self.uncond_logits2(x_code) # Real/Fake score for the background image
+                return [classi_score, rf_score]
 
-	elif self.stg_no > 0:
-        	x_code = self.img_code_s16(x_var)
-        	x_code = self.img_code_s32(x_code)
-        	x_code = self.img_code_s32_1(x_code)
+        elif self.stg_no > 0:
+                x_code = self.img_code_s16(x_var)
+                x_code = self.img_code_s32(x_code)
+                x_code = self.img_code_s32_1(x_code)
                 h_c_code = self.jointConv(x_code)
                 code_pred = self.logits(h_c_code) # Predicts the parent code and child code in parent and child stage respectively
                 rf_score = self.uncond_logits(x_code) # This score is not used in parent stage while training
-            	return [code_pred.view(-1, self.ef_dim), rf_score.view(-1)]
+                return [code_pred.view(-1, self.ef_dim), rf_score.view(-1)]
 
 
 
