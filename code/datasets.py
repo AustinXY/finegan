@@ -61,7 +61,7 @@ def get_imgs(img_path, imsize, bbox=None,
 
     retf = []
     retc = []
-    re_cimg = transforms.Scale(imsize[1])(cimg)
+    re_cimg = transforms.Scale(64)(cimg)
     retc.append(normalize(re_cimg))
 
     # We use full image to get background patches
@@ -69,7 +69,7 @@ def get_imgs(img_path, imsize, bbox=None,
     # We resize the full image to be 126 X 126 (instead of 128 X 128)  for the full coverage of the input (full) image by
     # the receptive fields of the final convolution layer of background discriminator
 
-    my_crop_width = 126
+    my_crop_width = 62
     re_fimg = transforms.Scale(int(my_crop_width * 76 / 64))(fimg)
     re_width, re_height = re_fimg.size
 
@@ -86,10 +86,10 @@ def get_imgs(img_path, imsize, bbox=None,
     warped_x2 = warped_x1 + (bbox[2] * re_width / width)
     warped_y2 = warped_y1 + (bbox[3] * re_height / height)
 
-    warped_x1 =min(max(0, warped_x1 - crop_start_x), my_crop_width)
-    warped_y1 =min(max(0, warped_y1 - crop_start_y), my_crop_width)
-    warped_x2 =max(min(my_crop_width, warped_x2 - crop_start_x),0)
-    warped_y2 =max(min(my_crop_width, warped_y2 - crop_start_y),0)
+    warped_x1 = min(max(0, warped_x1 - crop_start_x), my_crop_width)
+    warped_y1 = min(max(0, warped_y1 - crop_start_y), my_crop_width)
+    warped_x2 = max(min(my_crop_width, warped_x2 - crop_start_x),0)
+    warped_y2 = max(min(my_crop_width, warped_y2 - crop_start_y),0)
 
     # random flipping
     random_flag=np.random.randint(2)

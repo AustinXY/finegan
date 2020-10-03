@@ -57,7 +57,7 @@ if __name__ == "__main__":
     torch.manual_seed(args.manualSeed)
     if cfg.CUDA:
         torch.cuda.manual_seed_all(args.manualSeed)
-    
+
     # Evaluation part
     if not cfg.TRAIN.FLAG:
         from trainer import FineGAN_evaluator as evaluator
@@ -90,8 +90,8 @@ if __name__ == "__main__":
 
         from datasets import Dataset
         dataset = Dataset(cfg.DATA_DIR,
-                              base_size=cfg.TREE.BASE_SIZE,
-                              transform=image_transform)
+                            base_size=cfg.TREE.BASE_SIZE,
+                            transform=image_transform)
         assert dataset
         num_gpu = len(cfg.GPU_ID.split(','))
         dataloader = torch.utils.data.DataLoader(

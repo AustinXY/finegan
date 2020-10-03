@@ -8,15 +8,15 @@ import torch.nn.functional as F
 from torch.nn import Upsample
 
 
-class GLU(nn.Module):
-    def __init__(self):
-        super(GLU, self).__init__()
+# class GLU(nn.Module):
+#     def __init__(self):
+#         super(GLU, self).__init__()
 
-    def forward(self, x):
-        nc = x.size(1)
-        assert nc % 2 == 0, 'channels dont divide 2!'
-        nc = int(nc/2)
-        return x[:, :nc] * F.sigmoid(x[:, nc:])
+#     def forward(self, x):
+#         nc = x.size(1)
+#         assert nc % 2 == 0, 'channels dont divide 2!'
+#         nc = int(nc/2)
+#         return x[:, :nc] * F.sigmoid(x[:, nc:])
 
 
 def conv3x3(in_planes, out_planes):
@@ -32,7 +32,6 @@ def convlxl(in_planes, out_planes):
 
 
 def child_to_parent(child_c_code, classes_child, classes_parent):
-
     ratio = classes_child / classes_parent
     arg_parent = torch.argmax(child_c_code, dim=1) / ratio
     parent_c_code = torch.zeros([child_c_code.size(0), classes_parent]).cuda()
@@ -45,26 +44,26 @@ def child_to_parent(child_c_code, classes_child, classes_parent):
 def upBlock(in_planes, out_planes):
     block = nn.Sequential(
         nn.Upsample(scale_factor=2, mode='nearest'),
-        conv3x3(in_planes, out_planes * 2),
-        nn.BatchNorm2d(out_planes * 2),
-        GLU()
+        conv3x3(in_planes, out_planes),
+        nn.BatchNorm2d(out_planes),
+        nn.ReLU()
     )
     return block
 
 def sameBlock(in_planes, out_planes):
     block = nn.Sequential(
-        conv3x3(in_planes, out_planes * 2),
-        nn.BatchNorm2d(out_planes * 2),
-        GLU()
+        conv3x3(in_planes, out_planes),
+        nn.BatchNorm2d(out_planes),
+        nn.ReLU()
     )
     return block
 
 # Keep the spatial size
 def Block3x3_relu(in_planes, out_planes):
     block = nn.Sequential(
-        conv3x3(in_planes, out_planes * 2),
-        nn.BatchNorm2d(out_planes * 2),
-        GLU()
+        conv3x3(in_planes, out_planes),
+        nn.BatchNorm2d(out_planes),
+        nn.ReLU()
     )
     return block
 
@@ -73,14 +72,12 @@ class ResBlock(nn.Module):
     def __init__(self, channel_num):
         super(ResBlock, self).__init__()
         self.block = nn.Sequential(
-            conv3x3(channel_num, channel_num * 2),
-            nn.BatchNorm2d(channel_num * 2),
-            GLU(),
+            conv3x3(channel_num, channel_num),
+            nn.BatchNorm2d(channel_num),
+            nn.ReLU(),
             conv3x3(channel_num, channel_num),
             nn.BatchNorm2d(channel_num)
         )
-
-
     def forward(self, x):
         residual = x
         out = self.block(x)
@@ -103,14 +100,14 @@ class INIT_STAGE_G_(nn.Module):
         in_dim = self.in_dim
         ngf = self.gf_dim
         self.fc = nn.Sequential(
-            nn.Linear(in_dim, ngf * 4 * 4 * 2, bias=False),
-            nn.BatchNorm1d(ngf * 4 * 4 * 2),
-            GLU())
+            nn.Linear(in_dim, ngf * 4 * 4, bias=False),
+            nn.BatchNorm1d(ngf * 4 * 4),
+            nn.ReLU())
         self.upsample1 = upBlock(ngf, ngf // 2)
         self.upsample2 = upBlock(ngf // 2, ngf // 4)
         self.upsample3 = upBlock(ngf // 4, ngf // 8)
         self.upsample4 = upBlock(ngf // 8, ngf // 16)
-        self.upsample5 = upBlock(ngf // 16, ngf // 16)
+        # self.upsample5 = upBlock(ngf // 16, ngf // 16)
         self.attn = Self_Attn(ngf // 16, 'relu')
 
     def forward(self, z_code, code):
@@ -121,7 +118,7 @@ class INIT_STAGE_G_(nn.Module):
         out_code = self.upsample2(out_code)
         out_code = self.upsample3(out_code)
         out_code = self.upsample4(out_code)
-        out_code = self.upsample5(out_code)
+        # out_code = self.upsample5(out_code)
         out_code, _ = self.attn(out_code)
         return out_code
 
@@ -141,14 +138,14 @@ class INIT_STAGE_G(nn.Module):
         in_dim = self.in_dim
         ngf = self.gf_dim
         self.fc = nn.Sequential(
-            nn.Linear(in_dim, ngf * 4 * 4 * 2, bias=False),
-            nn.BatchNorm1d(ngf * 4 * 4 * 2),
-            GLU())
+            nn.Linear(in_dim, ngf * 4 * 4, bias=False),
+            nn.BatchNorm1d(ngf * 4 * 4),
+            nn.ReLU())
         self.upsample1 = upBlock(ngf, ngf // 2)
         self.upsample2 = upBlock(ngf // 2, ngf // 4)
         self.upsample3 = upBlock(ngf // 4, ngf // 8)
         self.upsample4 = upBlock(ngf // 8, ngf // 16)
-        self.upsample5 = upBlock(ngf // 16, ngf // 16)
+        # self.upsample5 = upBlock(ngf // 16, ngf // 16)
 
     def forward(self, z_code, code):
         in_code = torch.cat((code, z_code), 1)
@@ -158,7 +155,7 @@ class INIT_STAGE_G(nn.Module):
         out_code = self.upsample2(out_code)
         out_code = self.upsample3(out_code)
         out_code = self.upsample4(out_code)
-        out_code = self.upsample5(out_code)
+        # out_code = self.upsample5(out_code)
         return out_code
 
 
@@ -174,11 +171,11 @@ class NEXT_STAGE_G(nn.Module):
         self.num_residual = num_residual
         self.define_module()
 
-    def _make_layer(self, block, channel_num):
-        layers = []
-        for i in range(self.num_residual):
-            layers.append(block(channel_num))
-        return nn.Sequential(*layers)
+    # def _make_layer(self, block, channel_num):
+    #     layers = []
+    #     for i in range(self.num_residual):
+    #         layers.append(block(channel_num))
+    #     return nn.Sequential(*layers)
 
     def define_module(self):
         ngf = self.gf_dim
@@ -229,7 +226,6 @@ class Self_Attn(nn.Module):
         self.value_conv = nn.Conv2d(
             in_channels=in_dim, out_channels=in_dim, kernel_size=1)
         self.gamma = nn.Parameter(torch.zeros(1))
-
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, x):
@@ -277,7 +273,7 @@ class G_NET(nn.Module):
         self.gf_dim = cfg.GAN.GF_DIM
         self.define_module()
         self.upsampling = Upsample(scale_factor=2, mode = 'bilinear')
-        self.scale_fimg = nn.UpsamplingBilinear2d(size = [126, 126])
+        self.scale_fimg = nn.UpsamplingBilinear2d(size = [62, 62])
 
     def define_module(self):
 
@@ -310,8 +306,8 @@ class G_NET(nn.Module):
         #Background stage
         h_code1_bg = self.h_net1_bg(z_code, bg_code)
         fake_img1 = self.img_net1_bg(h_code1_bg) # Background image
-        fake_img1_126 = self.scale_fimg(fake_img1) # Resizing fake background image from 128x128 to the resolution which background discriminator expects: 126 x 126.
-        fake_imgs.append(fake_img1_126)
+        fake_img1_62 = self.scale_fimg(fake_img1) # Resizing fake background image from 128x128 to the resolution which background discriminator expects: 126 x 126.
+        fake_imgs.append(fake_img1_62)
 
         #Parent stage
         h_code1 = self.h_net1(z_code, p_code)
@@ -376,9 +372,9 @@ def encode_parent_and_child_img(ndf): # Defines the encoder network used for par
         nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),
         nn.BatchNorm2d(ndf * 4),
         nn.LeakyReLU(0.2, inplace=True),
-        nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False),
-        nn.BatchNorm2d(ndf * 8),
-        nn.LeakyReLU(0.2, inplace=True)
+        # nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False),
+        # nn.BatchNorm2d(ndf * 8),
+        # nn.LeakyReLU(0.2, inplace=True)
     )
     return encode_img
 
@@ -387,10 +383,10 @@ def encode_background_img(ndf): # Defines the encoder network used for backgroun
     encode_img = nn.Sequential(
         nn.Conv2d(3, ndf, 4, 2, 0, bias=False),
         nn.LeakyReLU(0.2, inplace=True),
-        nn.Conv2d(ndf, ndf * 2, 4, 2, 0, bias=False),
+        nn.Conv2d(ndf, ndf * 2, 4, 1, 0, bias=False),
         nn.LeakyReLU(0.2, inplace=True),
-        nn.Conv2d(ndf * 2, ndf * 4, 4, 1, 0, bias=False),
-        nn.LeakyReLU(0.2, inplace=True),
+        # nn.Conv2d(ndf * 2, ndf * 4, 4, 1, 0, bias=False),
+        # nn.LeakyReLU(0.2, inplace=True),
     )
     return encode_img
 
@@ -402,64 +398,60 @@ class D_NET(nn.Module):
         self.stg_no = stg_no
 
         if self.stg_no  == 0:
-                self.ef_dim = 1
+            self.ef_dim = 1
         elif self.stg_no == 1:
-                self.ef_dim = cfg.SUPER_CATEGORIES
+            self.ef_dim = cfg.SUPER_CATEGORIES
         elif self.stg_no == 2:
-                self.ef_dim = cfg.FINE_GRAINED_CATEGORIES
+            self.ef_dim = cfg.FINE_GRAINED_CATEGORIES
         else:
-                print ("Invalid stage number. Set stage number as follows:")
-                print ("0 - for background stage")
-                print ("1 - for parent stage")
-                print ("2 - for child stage")
-                print ("...Exiting now")
-                sys.exit(0)
+            print ("Invalid stage number. Set stage number as follows:")
+            print ("0 - for background stage")
+            print ("1 - for parent stage")
+            print ("2 - for child stage")
+            print ("...Exiting now")
+            sys.exit(0)
         self.define_module()
 
     def define_module(self):
         ndf = self.df_dim
         efg = self.ef_dim
-
         if self.stg_no == 0:
-
-                self.patchgan_img_code_s16 = encode_background_img(ndf)
-                self.uncond_logits1 = nn.Sequential(
-                nn.Conv2d(ndf * 4, 1, kernel_size=4, stride=1),
-                nn.Sigmoid())
-                self.uncond_logits2 = nn.Sequential(
-                nn.Conv2d(ndf * 4, 1, kernel_size=4, stride=1),
-                nn.Sigmoid())
-
+            self.patchgan_img_code_s16 = encode_background_img(ndf)
+            self.uncond_logits1 = nn.Sequential(
+            nn.Conv2d(ndf * 2, 1, kernel_size=4, stride=1),
+            nn.Sigmoid())
+            self.uncond_logits2 = nn.Sequential(
+            nn.Conv2d(ndf * 2, 1, kernel_size=4, stride=1),
+            nn.Sigmoid())
         else:
-                self.img_code_s16 = encode_parent_and_child_img(ndf)
-                self.img_code_s32 = downBlock(ndf * 8, ndf * 16)
-                self.img_code_s32_1 = Block3x3_leakRelu(ndf * 16, ndf * 8)
+            self.img_code_s16 = encode_parent_and_child_img(ndf)
+            self.img_code_s32 = downBlock(ndf * 4, ndf * 8)
+            self.img_code_s32_1 = Block3x3_leakRelu(ndf * 8, ndf * 4)
 
-                self.logits = nn.Sequential(
-                    nn.Conv2d(ndf * 8, efg, kernel_size=4, stride=4))
+            self.logits = nn.Sequential(
+                nn.Conv2d(ndf * 4, efg, kernel_size=4, stride=4))
 
-                self.jointConv = Block3x3_leakRelu(ndf * 8, ndf * 8)
-                self.uncond_logits = nn.Sequential(
-                nn.Conv2d(ndf * 8, 1, kernel_size=4, stride=4),
-                nn.Sigmoid())
+            self.jointConv = Block3x3_leakRelu(ndf * 4, ndf * 4)
+            self.uncond_logits = nn.Sequential(
+            nn.Conv2d(ndf * 4, 1, kernel_size=4, stride=4),
+            nn.Sigmoid())
 
 
     def forward(self, x_var):
-
         if self.stg_no == 0:
-                x_code = self.patchgan_img_code_s16(x_var)
-                classi_score = self.uncond_logits1(x_code) # Background vs Foreground classification score (0 - background and 1 - foreground)
-                rf_score = self.uncond_logits2(x_code) # Real/Fake score for the background image
-                return [classi_score, rf_score]
+            x_code = self.patchgan_img_code_s16(x_var)
+            classi_score = self.uncond_logits1(x_code) # Background vs Foreground classification score (0 - background and 1 - foreground)
+            rf_score = self.uncond_logits2(x_code) # Real/Fake score for the background image
+            return [classi_score, rf_score]
 
         elif self.stg_no > 0:
-                x_code = self.img_code_s16(x_var)
-                x_code = self.img_code_s32(x_code)
-                x_code = self.img_code_s32_1(x_code)
-                h_c_code = self.jointConv(x_code)
-                code_pred = self.logits(h_c_code) # Predicts the parent code and child code in parent and child stage respectively
-                rf_score = self.uncond_logits(x_code) # This score is not used in parent stage while training
-                return [code_pred.view(-1, self.ef_dim), rf_score.view(-1)]
+            x_code = self.img_code_s16(x_var)
+            x_code = self.img_code_s32(x_code)
+            x_code = self.img_code_s32_1(x_code)
+            h_c_code = self.jointConv(x_code)
+            code_pred = self.logits(h_c_code) # Predicts the parent code and child code in parent and child stage respectively
+            rf_score = self.uncond_logits(x_code) # This score is not used in parent stage while training
+            return [code_pred.view(-1, self.ef_dim), rf_score.view(-1)]
 
 
 

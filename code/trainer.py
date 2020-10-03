@@ -30,11 +30,12 @@ from model import G_NET, D_NET
 def child_to_parent(child_c_code, classes_child, classes_parent):
 
     ratio = classes_child / classes_parent
-    arg_parent = torch.argmax(child_c_code,  dim = 1) / ratio
+    arg_parent = torch.argmax(child_c_code, dim=1) / ratio
     parent_c_code = torch.zeros([child_c_code.size(0), classes_parent]).cuda()
     for i in range(child_c_code.size(0)):
-        parent_c_code[i][arg_parent[i]] = 1
+        parent_c_code[i][arg_parent[i].type(torch.LongTensor)] = 1
     return parent_c_code
+
 
 
 def weights_init(m):
@@ -232,6 +233,10 @@ class FineGAN_trainer(object):
             real_imgs = self.real_cimgs[0]
 
         fake_imgs = self.fake_imgs[idx]
+
+        # print(real_imgs.size())
+        # print(fake_imgs.size())
+        # sys.exit(0)
         netD.zero_grad()
         real_logits = netD(real_imgs)
 
@@ -239,33 +244,30 @@ class FineGAN_trainer(object):
             fake_labels = torch.zeros_like(real_logits[1])
             real_labels = torch.ones_like(real_logits[1])
         elif idx == 0:
+            fake_labels = torch.zeros_like(real_logits[1])
+            ext, output = real_logits
+            weights_real = torch.ones_like(output)
+            real_labels = torch.ones_like(output)
 
-                fake_labels = torch.zeros_like(real_logits[1])
-                ext, output = real_logits
-                weights_real = torch.ones_like(output)
-                real_labels = torch.ones_like(output)
+            for i in range(batch_size):
+                    x1 =  self.warped_bbox[0][i]
+                    x2 =  self.warped_bbox[2][i]
+                    y1 =  self.warped_bbox[1][i]
+                    y2 =  self.warped_bbox[3][i]
 
-                for i in range(batch_size):
-                        x1 =  self.warped_bbox[0][i]
-                        x2 =  self.warped_bbox[2][i]
-                        y1 =  self.warped_bbox[1][i]
-                        y2 =  self.warped_bbox[3][i]
+                    a1 = max(torch.tensor(0).float().cuda(), torch.ceil((x1 - self.recp_field)/self.patch_stride))
+                    a2 = min(torch.tensor(self.n_out - 1).float().cuda(), torch.floor((self.n_out - 1) - ((126 - self.recp_field) - x2)/self.patch_stride)) + 1
+                    b1 = max(torch.tensor(0).float().cuda(), torch.ceil((y1 - self.recp_field)/self.patch_stride))
+                    b2 = min(torch.tensor(self.n_out - 1).float().cuda(), torch.floor((self.n_out - 1) - ((126 - self.recp_field) - y2)/self.patch_stride)) + 1
 
-                        a1 = max(torch.tensor(0).float().cuda(), torch.ceil((x1 - self.recp_field)/self.patch_stride))
-                        a2 = min(torch.tensor(self.n_out - 1).float().cuda(), torch.floor((self.n_out - 1) - ((126 - self.recp_field) - x2)/self.patch_stride)) + 1
-                        b1 = max(torch.tensor(0).float().cuda(), torch.ceil((y1 - self.recp_field)/self.patch_stride))
-                        b2 = min(torch.tensor(self.n_out - 1).float().cuda(), torch.floor((self.n_out - 1) - ((126 - self.recp_field) - y2)/self.patch_stride)) + 1
+                    if (x1 != x2 and y1 != y2):
+                            weights_real[i, :, a1.type(torch.int) : a2.type(torch.int) , b1.type(torch.int) : b2.type(torch.int)] = 0.0
 
-                        if (x1 != x2 and y1 != y2):
-                                weights_real[i, :, a1.type(torch.int) : a2.type(torch.int) , b1.type(torch.int) : b2.type(torch.int)] = 0.0
-
-                norm_fact_real = weights_real.sum()
-                norm_fact_fake = weights_real.shape[0]*weights_real.shape[1]*weights_real.shape[2]*weights_real.shape[3]
-                real_logits = ext, output
+            norm_fact_real = weights_real.sum()
+            norm_fact_fake = weights_real.shape[0]*weights_real.shape[1]*weights_real.shape[2]*weights_real.shape[3]
+            real_logits = ext, output
 
         fake_logits = netD(fake_imgs.detach())
-
-
 
         if idx == 0: # Background stage
 
@@ -280,7 +282,7 @@ class FineGAN_trainer(object):
             errD_fake_uncond = errD_fake_uncond.mean()
 
             if (norm_fact_real > 0):    # Normalizing the real/fake loss for background after accounting the number of masked members in the output.
-            	errD_real = errD_real_uncond * ((norm_fact_fake * 1.0) /(norm_fact_real * 1.0))
+                errD_real = errD_real_uncond * ((norm_fact_fake * 1.0) /(norm_fact_real * 1.0))
             else:
                 errD_real = errD_real_uncond
 
@@ -288,21 +290,20 @@ class FineGAN_trainer(object):
             errD = ((errD_real + errD_fake) * cfg.TRAIN.BG_LOSS_WT) + errD_real_uncond_classi
 
         if idx == 2:
-
             errD_real = criterion_one(real_logits[1], real_labels) # Real/Fake loss for the real image
             errD_fake = criterion_one(fake_logits[1], fake_labels) # Real/Fake loss for the fake image
             errD = errD_real + errD_fake
 
         if (idx == 0 or idx == 2):
-              errD.backward()
-              optD.step()
+            errD.backward()
+            optD.step()
 
         if (flag == 0):
-            summary_D = summary.scalar('D_loss%d' % idx, errD.data[0])
+            summary_D = summary.scalar('D_loss%d' % idx, errD.item())
             self.summary_writer.add_summary(summary_D, count)
-            summary_D_real = summary.scalar('D_loss_real_%d' % idx, errD_real.data[0])
+            summary_D_real = summary.scalar('D_loss_real_%d' % idx, errD_real.item())
             self.summary_writer.add_summary(summary_D_real, count)
-            summary_D_fake = summary.scalar('D_loss_fake_%d' % idx, errD_fake.data[0])
+            summary_D_fake = summary.scalar('D_loss_fake_%d' % idx, errD_fake.item())
             self.summary_writer.add_summary(summary_D_fake, count)
 
         return errD
@@ -341,11 +342,11 @@ class FineGAN_trainer(object):
 
             if flag == 0:
                 if i>0:
-                  summary_D_class = summary.scalar('Information_loss_%d' % i, errG_info.data[0])
+                  summary_D_class = summary.scalar('Information_loss_%d' % i, errG_info.item())
                   self.summary_writer.add_summary(summary_D_class, count)
 
                 if i == 0 or i == 2:
-                  summary_D = summary.scalar('G_loss%d' % i, errG.data[0])
+                  summary_D = summary.scalar('G_loss%d' % i, errG.item())
                   self.summary_writer.add_summary(summary_D, count)
 
         errG_total.backward()
@@ -376,9 +377,9 @@ class FineGAN_trainer(object):
         hard_noise = \
             Variable(torch.FloatTensor(self.batch_size, nz).normal_(0, 1)).cuda()
 
-        self.patch_stride = float(4)    # Receptive field stride given the current discriminator architecture for background stage
+        self.patch_stride = float(2)    # Receptive field stride given the current discriminator architecture for background stage
         self.n_out = 24                 # Output size of the discriminator at the background stage; N X N where N = 24
-        self.recp_field = 34            # Receptive field of each of the member of N X N
+        self.recp_field = 16            # Receptive field of each of the member of N X N
 
 
         if cfg.CUDA:
@@ -425,7 +426,9 @@ class FineGAN_trainer(object):
 
                 if count % cfg.TRAIN.SNAPSHOT_INTERVAL == 0:
                     backup_para = copy_G_params(self.netG)
-                    save_model(self.netG, avg_param_G, self.netsD, count, self.model_dir)
+                    if count % cfg.TRAIN.SAVEMODEL_INTERVAL == 0:
+                        save_model(self.netG, avg_param_G, self.netsD, count, self.model_dir)
+
                     # Save images
                     load_params(self.netG, avg_param_G)
                     self.netG.eval()
@@ -442,7 +445,7 @@ class FineGAN_trainer(object):
                          Loss_D: %.2f Loss_G: %.2f Time: %.2fs
                       '''
                   % (epoch, self.max_epoch, self.num_batches,
-                     errD_total.data[0], errG_total.data[0],
+                     errD_total.item(), errG_total.item(),
                      end_t - start_t))
 
         save_model(self.netG, avg_param_G, self.netsD, count, self.model_dir)
@@ -544,7 +547,7 @@ class FineGAN_trainer(object):
                              Loss_D: %.2f Loss_G: %.2f Time: %.2fs
                           '''
                       % (count, cfg.TRAIN.HARDNEG_MAX_ITER, self.num_batches,
-                         errD_total.data[0], errG_total.data[0],
+                         errD_total.item(), errG_total.item(),
                          end_t - start_t))
 
             if (count == cfg.TRAIN.HARDNEG_MAX_ITER): # Hard negative training complete
